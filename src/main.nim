@@ -6,11 +6,10 @@
 ## back to standard output.  When the server enters the shutting down
 ## state it exits the main loop.
 
-import std/json
+import std/options
 import jsonrpc
 import rpcdispatcher
 import lspserver
-import std/options
 
 proc main() =
   let conn = newRpcConnection()

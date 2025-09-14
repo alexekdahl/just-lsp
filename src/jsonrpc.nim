@@ -49,7 +49,9 @@ proc newRpcConnection*(inStream: Stream = nil, outStream: Stream = nil): RpcConn
 ## lines until an empty line is encountered, extracts the
 ## ``Content‑Length`` header and then reads that many bytes from
 ## ``inStream`` into the reusable ``buffer``.  The resulting byte
-## sequence is decoded as UTF‑8 JSON.
+## sequence is decoded as UTF‑8 JSON.  Header names are treated
+## case‑insensitively and a trailing carriage return (\r) is ignored
+## in accordance with the JSON‑RPC/LSP specification.
 proc readMessage*(conn: RpcConnection): Option[JsonNode] =
   var line: string
   var contentLength = 0
@@ -61,11 +63,24 @@ proc readMessage*(conn: RpcConnection): Option[JsonNode] =
     # ``readLine`` fills ``line`` and returns true when a line was read.
     if not conn.inStream.readLine(line):
       return none(JsonNode)
-    if line.startsWith("Content-Length:"):
-      contentLength = parseInt(line.split(":", 1)[1].strip())
-    elif line.len == 0:
+    # Strip trailing carriage returns (for CRLF) and surrounding whitespace.
+    let headerLine = line.strip()
+    # An empty line indicates the end of the headers.
+    if headerLine.len == 0:
       break
+    # Split header on the first colon and parse known fields.
+    let parts = headerLine.split(":", 1)
+    if parts.len == 2:
+      let name = parts[0].strip().toLowerAscii()
+      let value = parts[1].strip()
+      if name == "content-length":
+        try:
+          contentLength = parseInt(value)
+        except ValueError:
+          contentLength = 0
+      # Unknown headers (e.g. Content-Type) are ignored.
 
+  # If no valid content length was provided return none.
   if contentLength <= 0:
     return none(JsonNode)
   # Ensure the buffer is large enough to hold the payload.  Avoid

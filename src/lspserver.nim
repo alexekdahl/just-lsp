@@ -97,30 +97,63 @@ proc isHeaderAndAfterColon(line: string; col: int): bool {.inline.} =
 ## ``exit``, and simple text document lifecycle notifications.  The
 ## server maintains its document map in response to these events.
 proc registerCoreMethods*(s: LspServer) =
-  # initialize: return empty capabilities
+  ## ``initialize``: return server capabilities and optional server info.
+  ## According to the LSP specification the initialize response must
+  ## advertise the features the server supports.  This server
+  ## advertises full text document synchronization (open/close + full
+  ## content on change) and a ``definitionProvider`` so that clients
+  ## know that ``textDocument/definition`` is implemented.  We also
+  ## declare that positions are encoded using UTF‑16 code units which
+  ## matches the default expectation for most clients.  Additional
+  ## capabilities may be added here as new features are implemented.
   s.dispatcher.registerRequest("initialize", proc (params: JsonNode): Result[JsonNode] =
-    okResult(%*{"capabilities": %*{}}))
-  # shutdown: mark server as shutting down and return empty result
+    let capabilities = %*{
+      "textDocumentSync": %*{ "openClose": true, "change": 1 },
+      "definitionProvider": true,
+      "positionEncoding": "utf-16"
+    }
+    let serverInfo = %*{
+      "name": "just-lsp",
+      "version": "0.1.0"
+    }
+    okResult(%*{
+      "serverInfo": serverInfo,
+      "capabilities": capabilities
+    })
+  )
+  # ``shutdown``: mark server as shutting down and return an empty result.
+  # After sending a shutdown request the client is expected to send
+  # ``exit``.  The server sets the shuttingDown flag and exits the
+  # message loop once the current message has been processed.
   s.dispatcher.registerRequest("shutdown", proc (params: JsonNode): Result[JsonNode] =
     s.shuttingDown = true
-    okResult(%*{}))
-  # exit notification: mark server as shutting down
+    okResult(%*{})
+  )
+  # ``exit`` notification: mark server as shutting down.  According to the
+  # specification the server should terminate if ``exit`` is received
+  # after ``shutdown``.  If a client sends ``exit`` without a prior
+  # ``shutdown`` the server should also terminate gracefully.
   s.dispatcher.registerNotification("exit", proc (params: JsonNode) =
-    s.shuttingDown = true)
-  # initialized notification: currently a no‑op
+    s.shuttingDown = true
+  )
+  # ``initialized`` notification: currently a no‑op.  This can be used
+  # in the future to send configuration requests back to the client or
+  # trigger additional initialisation.
   s.dispatcher.registerNotification("initialized", proc (params: JsonNode) = discard)
-  # textDocument/didOpen: add or update a document and index it
+  # ``textDocument/didOpen``: add or update a document and index it.
   s.dispatcher.registerNotification("textDocument/didOpen", proc (params: JsonNode) =
     let textDocument = params["textDocument"]
     let uri = textDocument["uri"].getStr()
     let text = textDocument["text"].getStr()
-    # Some clients provide version numbers; default to 0 when absent
+    # Some clients provide version numbers; default to 0 when absent.
     let version = if textDocument.hasKey("version"): textDocument["version"].getInt() else: 0
     let pr = parseJustfile(text)
     let idx = buildIndex(pr)
     s.documents[uri] = TextDocument(uri: uri, text: text, version: version, parse: pr, index: idx)
   )
-  # textDocument/didChange: update the text of an existing document
+  # ``textDocument/didChange``: update the text of an existing document.
+  # Since we advertise ``TextDocumentSyncKind.Full`` we expect the
+  # entire document text in the first entry of ``contentChanges``.
   s.dispatcher.registerNotification("textDocument/didChange", proc (params: JsonNode) =
     let uri = params["textDocument"]["uri"].getStr()
     let changes = params["contentChanges"]
@@ -130,7 +163,7 @@ proc registerCoreMethods*(s: LspServer) =
       let idx = buildIndex(pr)
       s.documents[uri] = TextDocument(uri: uri, text: newText, version: 0, parse: pr, index: idx)
   )
-  # textDocument/didClose: remove a document from the map
+  # ``textDocument/didClose``: remove a document from the map.
   s.dispatcher.registerNotification("textDocument/didClose", proc (params: JsonNode) =
     let uri = params["textDocument"]["uri"].getStr()
     if uri in s.documents:
@@ -141,8 +174,9 @@ proc registerCoreMethods*(s: LspServer) =
 ## indexed symbols for the word under the cursor and returns all
 ## matching locations.  The lookup rules follow those of just: within
 ## ``{{ ... }}`` only variables are considered; on headers after the
-## colon only recipes are considered; elsewhere recipes are tried
-## first then variables.
+## colon only recipes are considered; elsewhere recipes are tried first
+## then variables.  When definitions are found the handler returns an
+## array of LSP ``Location`` objects with ``uri`` and ``range``.
 proc registerGoToDefinition*(s: LspServer) =
   s.dispatcher.registerRequest("textDocument/definition",
     proc(params: JsonNode): Result[JsonNode] =

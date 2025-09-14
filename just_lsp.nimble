@@ -1,4 +1,4 @@
-# Package
+## Nimble package specification for the just-lsp language server.
 
 version       = "0.1.0"
 author        = "alexekdahl"
@@ -7,7 +7,5 @@ license       = "MIT"
 srcDir        = "src"
 bin           = @["main"]
 
-
-# Dependencies
-
+## Dependencies
 requires "nim >= 2.2.4"

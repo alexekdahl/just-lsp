@@ -11,7 +11,7 @@
 ## duplicating substrings.  This module depends only on the standard
 ## library.
 
-import std/[strutils, options, sequtils]
+import std/[strutils, options]
 
 type
   TextSpan* = object

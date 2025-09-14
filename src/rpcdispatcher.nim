@@ -111,12 +111,12 @@ proc dispatch*(d: RpcDispatcher, msg: JsonNode): Option[JsonNode] =
 
   # Route requests.
   if idPresent and methName in d.requests:
-    let result = d.requests[methName](params)
-    if result.isOkResult:
-      return some(%*{"jsonrpc": "2.0", "id": msg["id"], "result": result.get()})
+    let res = d.requests[methName](params)
+    if res.isOkResult:
+      return some(%*{"jsonrpc": "2.0", "id": msg["id"], "result": res.get()})
     else:
       return some(%*{"jsonrpc": "2.0", "id": msg["id"],
-        "error": {"code": -32000, "message": "Handler error", "data": result.error}})
+        "error": {"code": -32000, "message": "Handler error", "data": res.error}})
   elif not idPresent and methName in d.notifications:
     d.notifications[methName](params)
     return none(JsonNode)
