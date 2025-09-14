@@ -10,7 +10,7 @@
 ## competitive even without heavy optimisations.  Additional LSP
 ## methods can be registered in ``registerCoreMethods``.
 
-import std/[json, tables, options, strutils]
+import std/[json, tables, options, strutils, unicode]
 import rpcdispatcher, parser, indexer
 
 type
@@ -81,6 +81,35 @@ proc wordBounds(line: string; col: int): (int,int) {.inline.} =
   while e < n and (line[e].isAlphaNumeric() or line[e] in {'_', '-'}):
     inc e
   (s, e)
+
+## If the cursor sits on whitespace or just past a symbol, snap left into it.
+proc snapToSymbol(line: string; colByte: int): int {.inline.} =
+  var c = min(max(colByte, 0), line.len)
+  if c > 0 and (c == line.len or not (line[c].isAlphaNumeric() or line[c] in {'_', '-'})):
+    if line[c-1].isAlphaNumeric() or line[c-1] in {'_', '-'}:
+      dec c
+  c
+
+## UTF-16 <-> UTF-8 helpers (LSP uses UTF-16 code units by default).
+proc utf16ToByte*(line: string; col16: int): int =
+  var units = 0
+  var bytes = 0
+  for r in line.toRunes():
+    if units >= col16: break
+    let u = uint32(r)
+    units += (if u > 0xFFFF'u32: 2 else: 1)
+    bytes += r.toUTF8.len
+  min(bytes, line.len)
+
+proc byteToUtf16*(line: string; byteIx: int): int =
+  var units = 0
+  var bytes = 0
+  for r in line.toRunes():
+    if bytes >= byteIx: break
+    let u = uint32(r)
+    units += (if u > 0xFFFF'u32: 2 else: 1)
+    bytes += r.toUTF8.len
+  units
 
 ## Check whether ``col`` is inside a ``{{ ... }}`` brace block.
 proc inBraces(line: string; col: int): bool {.inline.} =
@@ -194,38 +223,82 @@ proc registerGoToDefinition*(s: LspServer) =
         return okResult(newJNull())
       let pos = params["position"]
       let li = pos["line"].getInt()
-      let co = pos["character"].getInt()
+      let co16 = pos["character"].getInt()
       let doc = s.documents[uri]
       let (ls, le) = lineSlice(doc.parse, li)
       # If the position is out of range, return null instead of an error
       if ls < 0:
         return okResult(newJNull())
       let line = doc.text[ls .. le]
-      let (ws, we) = wordBounds(line, co)
+      let coByte = snapToSymbol(line, utf16ToByte(line, co16))
+      let (ws, we) = wordBounds(line, coByte)
       # If there is no valid symbol at the position, return null
       if ws < 0:
         return okResult(newJNull())
       let word = line[ws ..< we]
+
       var locs: seq[JsonNode] = @[]
-      if inBraces(line, co):
+      if inBraces(line, coByte):
         if word in doc.index.varsByName:
           for d in doc.index.varsByName[word]:
-            locs.add(%*{"uri": uri, "range": {"start": {"line": d.line, "character": d.col}, "end": {"line": d.line, "character": d.col + word.len}}})
-      elif isHeaderAndAfterColon(line, co):
+            locs.add(%*{
+              "uri": uri,
+              "range": {
+                "start": {"line": d.line, "character": d.col},
+                "end":   {"line": d.line, "character": d.col + word.len}
+              }
+            })
+      elif isHeaderAndAfterColon(line, coByte):
         if word in doc.index.recipesByName:
           for d in doc.index.recipesByName[word]:
-            locs.add(%*{"uri": uri, "range": {"start": {"line": d.line, "character": d.col}, "end": {"line": d.line, "character": d.col + word.len}}})
+            locs.add(%*{
+              "uri": uri,
+              "range": {
+                "start": {"line": d.line, "character": d.col},
+                "end":   {"line": d.line, "character": d.col + word.len}
+              }
+            })
       else:
         if word in doc.index.recipesByName:
           for d in doc.index.recipesByName[word]:
-            locs.add(%*{"uri": uri, "range": {"start": {"line": d.line, "character": d.col}, "end": {"line": d.line, "character": d.col + word.len}}})
+            locs.add(%*{
+              "uri": uri,
+              "range": {
+                "start": {"line": d.line, "character": d.col},
+                "end":   {"line": d.line, "character": d.col + word.len}
+              }
+            })
         if locs.len == 0 and word in doc.index.varsByName:
           for d in doc.index.varsByName[word]:
-            locs.add(%*{"uri": uri, "range": {"start": {"line": d.line, "character": d.col}, "end": {"line": d.line, "character": d.col + word.len}}})
-      # If no definitions found, return null; otherwise return the locations
+            locs.add(%*{
+              "uri": uri,
+              "range": {
+                "start": {"line": d.line, "character": d.col},
+                "end":   {"line": d.line, "character": d.col + word.len}
+              }
+            })
+
       if locs.len == 0:
         return okResult(newJNull())
-      okResult(%*locs)
+
+      # Convert returned ranges to UTF-16 columns for the client
+      var locs16: seq[JsonNode] = @[]
+      for loc in locs:
+        let l = loc["range"]["start"]["line"].getInt()
+        let (dls, dle) = lineSlice(doc.parse, l)
+        let defLine = doc.text[dls .. dle]
+        let startByte = loc["range"]["start"]["character"].getInt()
+        let endByte   = loc["range"]["end"]["character"].getInt()
+        let start16 = byteToUtf16(defLine, startByte)
+        let end16   = byteToUtf16(defLine, endByte)
+        locs16.add(%*{
+          "uri": loc["uri"],
+          "range": {
+            "start": {"line": l, "character": start16},
+            "end":   {"line": l, "character": end16}
+          }
+        })
+      okResult(%*locs16)
   )
 
 ## Register the hover request. This handler provides hover information for a
@@ -241,13 +314,14 @@ proc registerHover*(s: LspServer) =
         return okResult(newJNull())
       let pos = params["position"]
       let li = pos["line"].getInt()
-      let co = pos["character"].getInt()
+      let co16 = pos["character"].getInt()
       let doc = s.documents[uri]
       let (ls, le) = lineSlice(doc.parse, li)
       if ls < 0:
         return okResult(newJNull())
       let line = doc.text[ls .. le]
-      let (ws, we) = wordBounds(line, co)
+      let coByte = snapToSymbol(line, utf16ToByte(line, co16))
+      let (ws, we) = wordBounds(line, coByte)
       if ws < 0:
         return okResult(newJNull())
       let word = line[ws ..< we]
@@ -260,12 +334,14 @@ proc registerHover*(s: LspServer) =
       else:
         return okResult(newJNull())
       # Build hover contents and range
+      let start16 = byteToUtf16(line, ws)
+      let end16   = byteToUtf16(line, we)
       let hoverObj = %*{
         "contents": {"kind": "plaintext", "value": kind & ": " & word},
-        "range": {
-          "start": {"line": li, "character": ws},
-          "end": {"line": li, "character": we}
-        }
+          "range": {
+            "start": {"line": li, "character": start16},
+            "end":   {"line": li, "character": end16}
+          }
       }
       okResult(hoverObj)
   )
