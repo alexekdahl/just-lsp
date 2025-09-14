@@ -36,6 +36,7 @@ type
 ## below.
 proc registerCoreMethods*(s: LspServer)
 proc registerGoToDefinition*(s: LspServer)
+proc registerHover*(s: LspServer)
 
 ## Construct a new LSP server and register the core and
 ## go‑to‑definition methods.  Other modules may register additional
@@ -51,6 +52,10 @@ proc newLspServer*(): LspServer =
   # them as methods (which could lead to “undeclared routine” errors).
   registerCoreMethods(result)
   registerGoToDefinition(result)
+  # Register the hover capability so that clients can request hover
+  # information for symbols.  This must be called after the core methods
+  # are registered to ensure the dispatcher is ready.
+  registerHover(result)
 
 ## A helper returning the absolute character indices for the start and
 ## end of a line.  If ``li`` is out of range the returned tuple
@@ -110,6 +115,7 @@ proc registerCoreMethods*(s: LspServer) =
     let capabilities = %*{
       "textDocumentSync": %*{ "openClose": true, "change": 1 },
       "definitionProvider": true,
+      "hoverProvider": true,
       "positionEncoding": "utf-16"
     }
     let serverInfo = %*{
@@ -181,19 +187,24 @@ proc registerGoToDefinition*(s: LspServer) =
   s.dispatcher.registerRequest("textDocument/definition",
     proc(params: JsonNode): Result[JsonNode] =
       let uri = params["textDocument"]["uri"].getStr()
+      # Return null when the document is not known. Returning a
+      # definition result of null conforms to the LSP definition
+      # specification instead of using an error result.
       if uri notin s.documents:
-        return errResult[JsonNode]("Document not found")
+        return okResult(newJNull())
       let pos = params["position"]
       let li = pos["line"].getInt()
       let co = pos["character"].getInt()
       let doc = s.documents[uri]
       let (ls, le) = lineSlice(doc.parse, li)
+      # If the position is out of range, return null instead of an error
       if ls < 0:
-        return errResult[JsonNode]("Position out of range")
+        return okResult(newJNull())
       let line = doc.text[ls .. le]
       let (ws, we) = wordBounds(line, co)
+      # If there is no valid symbol at the position, return null
       if ws < 0:
-        return errResult[JsonNode]("No symbol at position")
+        return okResult(newJNull())
       let word = line[ws ..< we]
       var locs: seq[JsonNode] = @[]
       if inBraces(line, co):
@@ -211,7 +222,50 @@ proc registerGoToDefinition*(s: LspServer) =
         if locs.len == 0 and word in doc.index.varsByName:
           for d in doc.index.varsByName[word]:
             locs.add(%*{"uri": uri, "range": {"start": {"line": d.line, "character": d.col}, "end": {"line": d.line, "character": d.col + word.len}}})
+      # If no definitions found, return null; otherwise return the locations
       if locs.len == 0:
-        return errResult[JsonNode]("Definition not found")
+        return okResult(newJNull())
       okResult(%*locs)
+  )
+
+## Register the hover request. This handler provides hover information for a
+## symbol under the cursor. It returns a Hover result with a plain text
+## description of the symbol kind (recipe or variable) and its name, along
+## with the range for which the hover applies. If no symbol is found at
+## the position, it returns null as per the LSP specification.
+proc registerHover*(s: LspServer) =
+  s.dispatcher.registerRequest("textDocument/hover",
+    proc(params: JsonNode): Result[JsonNode] =
+      let uri = params["textDocument"]["uri"].getStr()
+      if uri notin s.documents:
+        return okResult(newJNull())
+      let pos = params["position"]
+      let li = pos["line"].getInt()
+      let co = pos["character"].getInt()
+      let doc = s.documents[uri]
+      let (ls, le) = lineSlice(doc.parse, li)
+      if ls < 0:
+        return okResult(newJNull())
+      let line = doc.text[ls .. le]
+      let (ws, we) = wordBounds(line, co)
+      if ws < 0:
+        return okResult(newJNull())
+      let word = line[ws ..< we]
+      # Determine the kind of the symbol: prefer recipes over variables
+      var kind = ""
+      if word in doc.index.recipesByName:
+        kind = "recipe"
+      elif word in doc.index.varsByName:
+        kind = "variable"
+      else:
+        return okResult(newJNull())
+      # Build hover contents and range
+      let hoverObj = %*{
+        "contents": {"kind": "plaintext", "value": kind & ": " & word},
+        "range": {
+          "start": {"line": li, "character": ws},
+          "end": {"line": li, "character": we}
+        }
+      }
+      okResult(hoverObj)
   )

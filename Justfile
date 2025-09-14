@@ -8,3 +8,9 @@ build-debug:
 
 run: build
     ./main
+
+format:
+    find . -name '*.nim' -exec nimpretty {} +
+
+setup:
+    nimble install --depsOnly
