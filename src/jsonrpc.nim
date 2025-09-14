@@ -26,14 +26,15 @@ type
     ## message payloads.
     inStream: Stream
     outStream: Stream
-    buffer: string  ## Reusable message buffer
+    buffer: string ## Reusable message buffer
 
 ## Create a new JSON‑RPC connection using the given streams.  When
 ## called without arguments the standard input and output are wrapped
 ## into ``FileStream`` objects.  Explicit streams may be supplied
 ## instead of the defaults to connect the RPC layer to sockets or
 ## other sources.
-proc newRpcConnection*(inStream: Stream = nil, outStream: Stream = nil): RpcConnection =
+proc newRpcConnection*(inStream: Stream = nil,
+    outStream: Stream = nil): RpcConnection =
   var istream = inStream
   var ostream = outStream
   # When no input stream was provided convert ``stdin`` to a stream.
@@ -80,7 +81,7 @@ proc readMessage*(conn: RpcConnection): Option[JsonNode] =
           contentLength = 0
       # Unknown headers (e.g. Content-Type) are ignored.
 
-  # If no valid content length was provided return none.
+    # If no valid content length was provided return none.
   if contentLength <= 0:
     return none(JsonNode)
   # Ensure the buffer is large enough to hold the payload.  Avoid

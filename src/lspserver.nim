@@ -64,13 +64,14 @@ proc lineSlice(pr: ParseResult; li: int): (int, int) {.inline.} =
   if li < 0 or li >= pr.lineStarts.len:
     return (-1, -1)
   let start = pr.lineStarts[li]
-  let stop  = if li+1 < pr.lineStarts.len: pr.lineStarts[li+1]-1 else: pr.text.len-1
+  let stop = if li+1 < pr.lineStarts.len: pr.lineStarts[
+      li+1]-1 else: pr.text.len-1
   (start, stop)
 
 ## Determine the word boundaries around ``col`` in ``line``.  Valid
 ## characters for symbols include alphanumerics plus underscore and
 ## dash.  Returns (-1, -1) when no symbol is found at ``col``.
-proc wordBounds(line: string; col: int): (int,int) {.inline.} =
+proc wordBounds(line: string; col: int): (int, int) {.inline.} =
   var s = col
   var e = col
   let n = line.len
@@ -85,7 +86,8 @@ proc wordBounds(line: string; col: int): (int,int) {.inline.} =
 ## If the cursor sits on whitespace or just past a symbol, snap left into it.
 proc snapToSymbol(line: string; colByte: int): int {.inline.} =
   var c = min(max(colByte, 0), line.len)
-  if c > 0 and (c == line.len or not (line[c].isAlphaNumeric() or line[c] in {'_', '-'})):
+  if c > 0 and (c == line.len or not (line[c].isAlphaNumeric() or line[c] in {
+      '_', '-'})):
     if line[c-1].isAlphaNumeric() or line[c-1] in {'_', '-'}:
       dec c
   c
@@ -142,7 +144,7 @@ proc registerCoreMethods*(s: LspServer) =
   ## capabilities may be added here as new features are implemented.
   s.dispatcher.registerRequest("initialize", proc (params: JsonNode): Result[JsonNode] =
     let capabilities = %*{
-      "textDocumentSync": %*{ "openClose": true, "change": 1 },
+      "textDocumentSync": %*{"openClose": true, "change": 1},
       "definitionProvider": true,
       "hoverProvider": true,
       "positionEncoding": "utf-16"
@@ -174,32 +176,39 @@ proc registerCoreMethods*(s: LspServer) =
   # ``initialized`` notification: currently a no‑op.  This can be used
   # in the future to send configuration requests back to the client or
   # trigger additional initialisation.
-  s.dispatcher.registerNotification("initialized", proc (params: JsonNode) = discard)
+  s.dispatcher.registerNotification("initialized", proc (
+      params: JsonNode) = discard)
   # ``textDocument/didOpen``: add or update a document and index it.
-  s.dispatcher.registerNotification("textDocument/didOpen", proc (params: JsonNode) =
+  s.dispatcher.registerNotification("textDocument/didOpen", proc (
+      params: JsonNode) =
     let textDocument = params["textDocument"]
     let uri = textDocument["uri"].getStr()
     let text = textDocument["text"].getStr()
     # Some clients provide version numbers; default to 0 when absent.
-    let version = if textDocument.hasKey("version"): textDocument["version"].getInt() else: 0
+    let version = if textDocument.hasKey("version"): textDocument[
+        "version"].getInt() else: 0
     let pr = parseJustfile(text)
     let idx = buildIndex(pr)
-    s.documents[uri] = TextDocument(uri: uri, text: text, version: version, parse: pr, index: idx)
+    s.documents[uri] = TextDocument(uri: uri, text: text, version: version,
+        parse: pr, index: idx)
   )
   # ``textDocument/didChange``: update the text of an existing document.
   # Since we advertise ``TextDocumentSyncKind.Full`` we expect the
   # entire document text in the first entry of ``contentChanges``.
-  s.dispatcher.registerNotification("textDocument/didChange", proc (params: JsonNode) =
+  s.dispatcher.registerNotification("textDocument/didChange", proc (
+      params: JsonNode) =
     let uri = params["textDocument"]["uri"].getStr()
     let changes = params["contentChanges"]
     if changes.len > 0:
       let newText = changes[0]["text"].getStr()
       let pr = parseJustfile(newText)
       let idx = buildIndex(pr)
-      s.documents[uri] = TextDocument(uri: uri, text: newText, version: 0, parse: pr, index: idx)
+      s.documents[uri] = TextDocument(uri: uri, text: newText, version: 0,
+          parse: pr, index: idx)
   )
   # ``textDocument/didClose``: remove a document from the map.
-  s.dispatcher.registerNotification("textDocument/didClose", proc (params: JsonNode) =
+  s.dispatcher.registerNotification("textDocument/didClose", proc (
+      params: JsonNode) =
     let uri = params["textDocument"]["uri"].getStr()
     if uri in s.documents:
       s.documents.del(uri)
@@ -215,90 +224,90 @@ proc registerCoreMethods*(s: LspServer) =
 proc registerGoToDefinition*(s: LspServer) =
   s.dispatcher.registerRequest("textDocument/definition",
     proc(params: JsonNode): Result[JsonNode] =
-      let uri = params["textDocument"]["uri"].getStr()
-      # Return null when the document is not known. Returning a
-      # definition result of null conforms to the LSP definition
-      # specification instead of using an error result.
-      if uri notin s.documents:
-        return okResult(newJNull())
-      let pos = params["position"]
-      let li = pos["line"].getInt()
-      let co16 = pos["character"].getInt()
-      let doc = s.documents[uri]
-      let (ls, le) = lineSlice(doc.parse, li)
-      # If the position is out of range, return null instead of an error
-      if ls < 0:
-        return okResult(newJNull())
-      let line = doc.text[ls .. le]
-      let coByte = snapToSymbol(line, utf16ToByte(line, co16))
-      let (ws, we) = wordBounds(line, coByte)
-      # If there is no valid symbol at the position, return null
-      if ws < 0:
-        return okResult(newJNull())
-      let word = line[ws ..< we]
+    let uri = params["textDocument"]["uri"].getStr()
+    # Return null when the document is not known. Returning a
+    # definition result of null conforms to the LSP definition
+    # specification instead of using an error result.
+    if uri notin s.documents:
+      return okResult(newJNull())
+    let pos = params["position"]
+    let li = pos["line"].getInt()
+    let co16 = pos["character"].getInt()
+    let doc = s.documents[uri]
+    let (ls, le) = lineSlice(doc.parse, li)
+    # If the position is out of range, return null instead of an error
+    if ls < 0:
+      return okResult(newJNull())
+    let line = doc.text[ls .. le]
+    let coByte = snapToSymbol(line, utf16ToByte(line, co16))
+    let (ws, we) = wordBounds(line, coByte)
+    # If there is no valid symbol at the position, return null
+    if ws < 0:
+      return okResult(newJNull())
+    let word = line[ws ..< we]
 
-      var locs: seq[JsonNode] = @[]
-      if inBraces(line, coByte):
-        if word in doc.index.varsByName:
-          for d in doc.index.varsByName[word]:
-            locs.add(%*{
-              "uri": uri,
-              "range": {
-                "start": {"line": d.line, "character": d.col},
-                "end":   {"line": d.line, "character": d.col + word.len}
-              }
-            })
-      elif isHeaderAndAfterColon(line, coByte):
-        if word in doc.index.recipesByName:
-          for d in doc.index.recipesByName[word]:
-            locs.add(%*{
-              "uri": uri,
-              "range": {
-                "start": {"line": d.line, "character": d.col},
-                "end":   {"line": d.line, "character": d.col + word.len}
-              }
-            })
-      else:
-        if word in doc.index.recipesByName:
-          for d in doc.index.recipesByName[word]:
-            locs.add(%*{
-              "uri": uri,
-              "range": {
-                "start": {"line": d.line, "character": d.col},
-                "end":   {"line": d.line, "character": d.col + word.len}
-              }
-            })
-        if locs.len == 0 and word in doc.index.varsByName:
-          for d in doc.index.varsByName[word]:
-            locs.add(%*{
-              "uri": uri,
-              "range": {
-                "start": {"line": d.line, "character": d.col},
-                "end":   {"line": d.line, "character": d.col + word.len}
-              }
-            })
+    var locs: seq[JsonNode] = @[]
+    if inBraces(line, coByte):
+      if word in doc.index.varsByName:
+        for d in doc.index.varsByName[word]:
+          locs.add(%*{
+            "uri": uri,
+            "range": {
+              "start": {"line": d.line, "character": d.col},
+              "end": {"line": d.line, "character": d.col + word.len}
+            }
+          })
+    elif isHeaderAndAfterColon(line, coByte):
+      if word in doc.index.recipesByName:
+        for d in doc.index.recipesByName[word]:
+          locs.add(%*{
+            "uri": uri,
+            "range": {
+              "start": {"line": d.line, "character": d.col},
+              "end": {"line": d.line, "character": d.col + word.len}
+            }
+          })
+    else:
+      if word in doc.index.recipesByName:
+        for d in doc.index.recipesByName[word]:
+          locs.add(%*{
+            "uri": uri,
+            "range": {
+              "start": {"line": d.line, "character": d.col},
+              "end": {"line": d.line, "character": d.col + word.len}
+            }
+          })
+      if locs.len == 0 and word in doc.index.varsByName:
+        for d in doc.index.varsByName[word]:
+          locs.add(%*{
+            "uri": uri,
+            "range": {
+              "start": {"line": d.line, "character": d.col},
+              "end": {"line": d.line, "character": d.col + word.len}
+            }
+          })
 
-      if locs.len == 0:
-        return okResult(newJNull())
+    if locs.len == 0:
+      return okResult(newJNull())
 
-      # Convert returned ranges to UTF-16 columns for the client
-      var locs16: seq[JsonNode] = @[]
-      for loc in locs:
-        let l = loc["range"]["start"]["line"].getInt()
-        let (dls, dle) = lineSlice(doc.parse, l)
-        let defLine = doc.text[dls .. dle]
-        let startByte = loc["range"]["start"]["character"].getInt()
-        let endByte   = loc["range"]["end"]["character"].getInt()
-        let start16 = byteToUtf16(defLine, startByte)
-        let end16   = byteToUtf16(defLine, endByte)
-        locs16.add(%*{
-          "uri": loc["uri"],
-          "range": {
-            "start": {"line": l, "character": start16},
-            "end":   {"line": l, "character": end16}
-          }
-        })
-      okResult(%*locs16)
+    # Convert returned ranges to UTF-16 columns for the client
+    var locs16: seq[JsonNode] = @[]
+    for loc in locs:
+      let l = loc["range"]["start"]["line"].getInt()
+      let (dls, dle) = lineSlice(doc.parse, l)
+      let defLine = doc.text[dls .. dle]
+      let startByte = loc["range"]["start"]["character"].getInt()
+      let endByte = loc["range"]["end"]["character"].getInt()
+      let start16 = byteToUtf16(defLine, startByte)
+      let end16 = byteToUtf16(defLine, endByte)
+      locs16.add(%*{
+        "uri": loc["uri"],
+        "range": {
+          "start": {"line": l, "character": start16},
+          "end": {"line": l, "character": end16}
+        }
+      })
+    okResult(%*locs16)
   )
 
 ## Register the hover request. This handler provides hover information for a
@@ -309,39 +318,39 @@ proc registerGoToDefinition*(s: LspServer) =
 proc registerHover*(s: LspServer) =
   s.dispatcher.registerRequest("textDocument/hover",
     proc(params: JsonNode): Result[JsonNode] =
-      let uri = params["textDocument"]["uri"].getStr()
-      if uri notin s.documents:
-        return okResult(newJNull())
-      let pos = params["position"]
-      let li = pos["line"].getInt()
-      let co16 = pos["character"].getInt()
-      let doc = s.documents[uri]
-      let (ls, le) = lineSlice(doc.parse, li)
-      if ls < 0:
-        return okResult(newJNull())
-      let line = doc.text[ls .. le]
-      let coByte = snapToSymbol(line, utf16ToByte(line, co16))
-      let (ws, we) = wordBounds(line, coByte)
-      if ws < 0:
-        return okResult(newJNull())
-      let word = line[ws ..< we]
-      # Determine the kind of the symbol: prefer recipes over variables
-      var kind = ""
-      if word in doc.index.recipesByName:
-        kind = "recipe"
-      elif word in doc.index.varsByName:
-        kind = "variable"
-      else:
-        return okResult(newJNull())
-      # Build hover contents and range
-      let start16 = byteToUtf16(line, ws)
-      let end16   = byteToUtf16(line, we)
-      let hoverObj = %*{
-        "contents": {"kind": "plaintext", "value": kind & ": " & word},
-          "range": {
-            "start": {"line": li, "character": start16},
-            "end":   {"line": li, "character": end16}
-          }
+    let uri = params["textDocument"]["uri"].getStr()
+    if uri notin s.documents:
+      return okResult(newJNull())
+    let pos = params["position"]
+    let li = pos["line"].getInt()
+    let co16 = pos["character"].getInt()
+    let doc = s.documents[uri]
+    let (ls, le) = lineSlice(doc.parse, li)
+    if ls < 0:
+      return okResult(newJNull())
+    let line = doc.text[ls .. le]
+    let coByte = snapToSymbol(line, utf16ToByte(line, co16))
+    let (ws, we) = wordBounds(line, coByte)
+    if ws < 0:
+      return okResult(newJNull())
+    let word = line[ws ..< we]
+    # Determine the kind of the symbol: prefer recipes over variables
+    var kind = ""
+    if word in doc.index.recipesByName:
+      kind = "recipe"
+    elif word in doc.index.varsByName:
+      kind = "variable"
+    else:
+      return okResult(newJNull())
+    # Build hover contents and range
+    let start16 = byteToUtf16(line, ws)
+    let end16 = byteToUtf16(line, we)
+    let hoverObj = %*{
+      "contents": {"kind": "plaintext", "value": kind & ": " & word},
+        "range": {
+          "start": {"line": li, "character": start16},
+          "end": {"line": li, "character": end16}
       }
-      okResult(hoverObj)
+    }
+    okResult(hoverObj)
   )

@@ -17,8 +17,8 @@ type
   TextSpan* = object
     ## ``a`` and ``b`` are absolute indices into the source string.  ``b``
     ## is inclusive so that slicing with ``a .. b`` yields the text.
-    a*: int  ## absolute start index
-    b*: int  ## absolute end index (inclusive)
+    a*: int ## absolute start index
+    b*: int ## absolute end index (inclusive)
 
   ParseError* = object
     line*: int
@@ -69,7 +69,7 @@ proc parseJustfile*(text: string): ParseResult =
   var current: AstNode = nil
   for li in 0 ..< lineStarts.len:
     let start = lineStarts[li]
-    let stop  = (if li+1 < lineStarts.len: lineStarts[li+1]-1 else: text.len-1)
+    let stop = (if li+1 < lineStarts.len: lineStarts[li+1]-1 else: text.len-1)
     if start > stop:
       continue
 
@@ -82,7 +82,8 @@ proc parseJustfile*(text: string): ParseResult =
     if trimmed.contains(":="):
       let sepLocal = line.find(":=")
       if sepLocal <= 0:
-        res.errors.add(ParseError(line: li, col: 0, message: "Malformed variable"))
+        res.errors.add(ParseError(line: li, col: 0,
+            message: "Malformed variable"))
         current = nil
         continue
       let nameRaw = line[0 ..< sepLocal].strip()
@@ -100,7 +101,8 @@ proc parseJustfile*(text: string): ParseResult =
     if ":" in trimmed:
       let sepLocal = line.find(":")
       if sepLocal <= 0:
-        res.errors.add(ParseError(line: li, col: 0, message: "Malformed recipe"))
+        res.errors.add(ParseError(line: li, col: 0,
+            message: "Malformed recipe"))
         current = nil
         continue
       let nameRaw = line[0 ..< sepLocal].strip()
@@ -135,7 +137,8 @@ proc parseJustfile*(text: string): ParseResult =
       if current != nil and current.kind == akRecipe:
         current.body.add(TextSpan(a: start, b: stop))
       else:
-        res.errors.add(ParseError(line: li, col: 0, message: "Command not inside recipe"))
+        res.errors.add(ParseError(line: li, col: 0,
+            message: "Command not inside recipe"))
       continue
 
     # Otherwise the line is unrecognized.

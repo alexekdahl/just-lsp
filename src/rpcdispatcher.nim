@@ -89,7 +89,8 @@ proc registerRequest*(d: RpcDispatcher, name: string, handler: RequestHandler) =
 
 ## Register a notification handler.  Subsequent registrations for the
 ## same method will overwrite the previous handler.
-proc registerNotification*(d: RpcDispatcher, name: string, handler: NotificationHandler) =
+proc registerNotification*(d: RpcDispatcher, name: string,
+    handler: NotificationHandler) =
   ## Register a notification handler.  See ``registerRequest`` for
   ## details on naming.
   d.notifications[name] = handler
@@ -116,7 +117,8 @@ proc dispatch*(d: RpcDispatcher, msg: JsonNode): Option[JsonNode] =
       return some(%*{"jsonrpc": "2.0", "id": msg["id"], "result": res.get()})
     else:
       return some(%*{"jsonrpc": "2.0", "id": msg["id"],
-        "error": {"code": -32000, "message": "Handler error", "data": res.error}})
+        "error": {"code": -32000, "message": "Handler error",
+            "data": res.error}})
   elif not idPresent and methName in d.notifications:
     d.notifications[methName](params)
     return none(JsonNode)
